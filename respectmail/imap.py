@@ -1,0 +1,139 @@
+from imapclient import IMAPClient
+import email
+import warnings
+from getpass import getpass
+
+INBOX = 0
+SENT = 1
+JUNK = 2
+REQUESTS = 3
+FYI = 4
+CLOSED = 5
+REQUESTSTRIAGE = 6
+FYITRIAGE = 7
+CLOSEDTRIAGE = 8
+JUNKTRIAGE = 9
+
+class IMAPServer(object):
+    def __init__(self, host, user, password=None, ssl=True, serverID=1,
+                 mboxlist=('INBOX', 'Sent', 'Junk', 'Requests', 'FYI',
+                           'Closed', 'RequestsTriage', 'FYITriage',
+                           'ClosedTriage', 'JunkTriage'), **kwargs):
+        'connect to imap server'
+        self.server = IMAPClient(host, ssl=ssl, **kwargs)
+        if password is None:
+            password = getpass('Enter password for %s on %s:' %
+                               (user, host))
+        self.server.login(user, password)
+        self.mboxlist = mboxlist
+        self.serverID = serverID
+
+    def create_mailboxes(self):
+        'ensure that our standard mailboxes exist'
+        folders = frozenset([t[2] for t in self.server.list_folders()])
+        for mbox in self.mboxlist:
+            if mbox not in folders:
+                response = self.server.create_folder(mbox)
+                print 'Created', mbox, response
+
+    def get_updates(self, triageDB):
+        'get INBOX, SENT headers; save to triageDB'
+        msgLists = []
+        msgHeaders = get_headers(self.server, self.mboxlist[INBOX])
+        triageDB.save_headers(msgHeaders, self.mboxlist[INBOX],
+                              serverID=self.serverID, verdict=INBOX)
+        msgLists.append(msgHeaders)
+        msgHeaders = get_headers(self.server, self.mboxlist[SENT])
+        triageDB.save_headers(msgHeaders, self.mboxlist[SENT], fromMe=True,
+                              serverID=self.serverID, verdict=SENT)
+        msgLists.append(msgHeaders)
+        self.msgLists = msgLists
+        
+    def triage(self, triageDB):
+        requestAddrs, fyiAddrs, junkAddrs = triageDB.get_triage()
+        fromBox = self.mboxlist[INBOX]
+        msgHeaders = self.msgLists[INBOX]
+        msgSet = set([t[0] for t in msgHeaders])
+        answered = [t for t in msgHeaders if '\\Answered' in t[1]._imapFlags]
+        self._do_triage(None, answered, triageDB, fromBox, 
+                        self.mboxlist[CLOSEDTRIAGE])
+        msgSet -= frozenset([t[0] for t in answered])
+        requests = [t for t in msgHeaders if t[0] in msgSet and 
+                    triageDB.msgThread.get(t[1].uid, None) 
+                    in triageDB.myThreads]
+        self._do_triage(None, requests, triageDB, fromBox, 
+                        self.mboxlist[REQUESTSTRIAGE])
+        msgSet -= frozenset([t[0] for t in requests])
+        requests = self._do_triage(requestAddrs,
+                                   [t for t in msgHeaders if t[0] in msgSet],
+                                   triageDB,
+                                   fromBox, self.mboxlist[REQUESTSTRIAGE])
+        msgSet -= frozenset([t[0] for t in requests])
+        fyi = self._do_triage(fyiAddrs,
+                              [t for t in msgHeaders if t[0] in msgSet],
+                              triageDB,
+                              fromBox, self.mboxlist[FYITRIAGE])
+        msgSet -= frozenset([t[0] for t in fyi])
+        junk = self._do_triage(junkAddrs,
+                              [t for t in msgHeaders if t[0] in msgSet],
+                               triageDB,
+                              fromBox, self.mboxlist[JUNKTRIAGE])
+        msgSet -= frozenset([t[0] for t in fyi])
+        print 'Triage done: %d messages left in %s.' % (len(msgSet), fromBox)
+
+    def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):
+        if addrs:
+            msgHeaders = filter_mail(msgHeaders, addrs)
+        if not msgHeaders:
+            return
+        print 'Triaging %d messages to %s...' % (len(msgHeaders), toBox)
+        move_messages(self.server, msgHeaders, fromBox, toBox)
+        triageDB.save_moves(msgHeaders, toBox)
+        return msgHeaders
+        
+def get_from(msg):
+    origin = email.utils.getaddresses(msg.get_all('from', []))
+    return frozenset([t[1].lower() for t in origin])
+
+def filter_mail(msgHeaders, addrs):
+    return [t for t in msgHeaders if not get_from(t[1]).isdisjoint(addrs)]
+
+
+def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]'):
+    'retrieve headers for a mailbox, return as [(serverID,message_obj),]'
+    server.select_folder(mailbox)
+    msgList = server.search(['NOT DELETED'])
+    msgHeaders = []
+    for i in range(0, len(msgList), maxreq):
+        msgDict = server.fetch(msgList[i:i + maxreq], ['FLAGS', data])
+        for j,m in msgDict.iteritems():
+            try:
+                msg = email.message_from_string(m[data])
+            except UnicodeEncodeError:
+                warnings.warn('ignoring message headers due to UnicodeEncodeError')
+            else:
+                msg._imapFlags = m['FLAGS']
+                msgHeaders.append((j,msg))
+    return msgHeaders
+
+
+
+def move_messages(server, msgHeaders, fromBox='INBOX', toBox='Junk',
+                  expunge=True):
+    'copy the specified messages to toBox, then delete from fromBox'
+    server.select_folder(fromBox)
+    msgList = [t[0] for t in msgHeaders]
+    server.copy(msgList, toBox)
+    server.delete_messages(msgList)
+    if expunge:
+        server.expunge()
+
+def ensure_folder(server, foldername):
+    'create folder if it does not already exist and return response string'
+    for flags, delimiter, name in server.list_folders():
+        if name == foldername:
+            return False
+    return server.create_folder(foldername)
+
+#md = mailbox.Maildir('maildirtest')
+#    localID = md.add(msg)

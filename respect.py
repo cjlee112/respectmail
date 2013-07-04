@@ -9,6 +9,57 @@ from math import log, exp, isnan
 from scipy import special, stats
 import numpy
 
+
+class TriageDB(object):
+    def __init__(self, dbfile='maildir.db', createTables=False, myAddrs=()):
+        self.conn = db_connect(dbfile)
+        self.cursor = self.conn.cursor()
+        if createTables:
+            create_messages_table(self.cursor)
+            create_addrs_table(self.cursor)
+            create_addrs_table(self.cursor, 'junkaddrs')
+            save_myaddrs_table(self.cursor, myAddrs)
+            save_myaddrs_table(self.cursor, tableName='notjunk')
+            save_myaddrs_table(self.cursor, tableName='vip')
+            self.conn.commit()
+        myAddrs = set()
+        self.cursor.execute('select * from myaddrs')
+        for t in self.cursor.fetchall():
+            myAddrs.add(t[0].lower())
+        self.myAddrs = myAddrs
+
+    def save_headers(self, msgHeaders, mailbox='INBOX', fromMe=False, 
+                     serverID=1, **kwargs):
+        'save message headers to db as NEW messages'
+        if mailbox == 'Sent':
+            fromMe = True
+        if fromMe: # override from_me_f()
+            kwargs['from_me_f'] = None
+        save_messages(self.cursor, msgHeaders, fromMe=fromMe, mboxName=mailbox,
+                      myAddrs=self.myAddrs, serverID=serverID, **kwargs)
+        self.conn.commit()
+
+    def update_threads(self):
+        'extend thread analysis to NEW messages'
+        self.threadMsgs, self.msgThread, self.myThreads, self.low, self.high = \
+            reanalyze_threads(self.cursor)
+        self.conn.commit()
+
+    def get_triage(self, requestP=0.05, junkP=0.05, fyiReplies=1):
+        'get triage of email addresses into likely requests, fyi, junk sets'
+        requestAddrs = frozenset([t[3] for t in self.high if t[0] < requestP])
+        fyiAddrs = frozenset([t[3] for t in self.high if t[1] >= fyiReplies])
+        junkAddrs = get_junkaddrs(self.cursor, junkP)
+        return requestAddrs, fyiAddrs, junkAddrs
+
+    def save_moves(self, msgHeaders, toBox='Junk', tableName='messages'):
+        'record mailbox move for the set of messages'
+        for j,msg in msgHeaders:
+            self.cursor.execute('update %s set mailbox=?,serverMsg=NULL where id=?'
+                                % tableName, (toBox, msg.uid))
+        self.conn.commit()
+
+
 def iter_mailboxes(mailDir):
     for fname in os.listdir(mailDir):
         path = os.path.join(mailDir, fname)
@@ -36,6 +87,23 @@ def jost_pvalue(pvalues):
     m = logR.max()
     return exp(logk + m + log(numpy.exp(logR - m).sum()))
 
+def get_junkaddrs(c, p=0.05, maxreply=0, tableName='junkaddrs'):
+    c.execute('select email from notjunk')
+    notjunk = frozenset([t[0] for t in c.fetchall()])
+    c.execute('select email from %s where pval<? and nrelevant<=?'
+              % tableName, (p, maxreply))
+    return frozenset([t[0] for t in c.fetchall() if t[0] not in notjunk])
+
+def get_addrs(c, query='where pval<0.05', tableName='addrs'):
+    'get set of addrs below specified p-value cutoff'
+    c.execute('select email from %s %s' % (tableName, query))
+    return frozenset([t[0] for t in c.fetchall()])
+
+def get_headers_sender(headers):
+    try:
+        return email.utils.parseaddr(headers['from'])[1].lower()
+    except KeyError:
+        None
 
 # conversions
 # from, to
@@ -47,18 +115,26 @@ def db_connect(dbfile):
     'get connection that supports auto datetime conversion'
     return sqlite3.connect(dbfile, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
 
-def create_messages_table(c):
-    c.execute('''drop table if exists messages''')
-    c.execute('''create table messages
+def create_messages_table(c, tableName='messages'):
+    c.execute('''drop table if exists %s''' % tableName)
+    c.execute('''create table %s
             (id integer primary key, 
             msgid text,
+            serverID integer,
+            serverMsg text,
+            threadID integer,
+            myThread integer,
             mailbox text,
             date integer,
             flags text,
             received text,
+            sender text,
             fromMe integer,
             subject text,
-            headers text)''')
+            headers text,
+            verdict integer)''' % tableName)
+    c.execute('create unique index msgid on %s (msgid)' % tableName)
+    c.execute('create index threadID on %s (threadID)' % tableName)
 
 def create_threads_table(c):
     c.execute('''drop table if exists threads''')
@@ -78,13 +154,13 @@ def create_addrs_table(c, name='addrs'):
             nrelevant integer,
             ntotal integer)''' % name)
 
-def save_addrs(c, scores, name='addrs'):
+def save_addrs(c, scores, tableName='addrs'):
     for p,m,n,a in scores:
-        c.execute('insert into %s values (?,?,?,?)' % name, (a,p,m,n))
+        c.execute('insert into %s values (?,?,?,?)' % tableName, (a,p,m,n))
 
-def save_myaddrs_table(c, myAddrs):
-    c.execute('''create table if not exists myaddrs
-            (email text primary key)''')
+def save_myaddrs_table(c, myAddrs=(), tableName='myaddrs'):
+    c.execute('''create table if not exists %s
+            (email text primary key)''' % tableName)
     for a in myAddrs:
         c.execute('insert into myaddrs values (?)', (a,))
 
@@ -95,13 +171,28 @@ def get_all_recipients(m):
     resent_ccs = m.get_all('resent-cc', [])
     return email.utils.getaddresses(tos + ccs + resent_tos + resent_ccs)
 
+def is_from_me(m, myAddrs):
+    'assess whether message is from me or not'
+    origin = email.utils.getaddresses(m.get_all('from', []))
+    origin = frozenset([t[1].lower() for t in origin])
+    if not origin.isdisjoint(myAddrs):
+        return True # sent by me
+    else:
+        received = m.get('received', None)
+        recipients = get_all_recipients(m)
+        recipients = frozenset([t[1].lower() for t in recipients])
+        if received or not recipients.isdisjoint(myAddrs):
+            return False # sent to me
+        else:
+            return None # can't tell if I sent this...
+
 def save_sqlite3(mailboxes, myAddrs=None, dbfile='maildir.db', 
-                 conn=None, defaultTZ=8*3600, newTable=True):
+                 conn=None, newTable=True, tableName='messages', **kwargs):
     if not conn:
         conn = sqlite3.connect(dbfile)
     c = conn.cursor()
     if newTable:
-        create_messages_table(c)
+        create_messages_table(c, tableName)
         conn.commit()
     if myAddrs: # save to database
         save_myaddrs_table(c, myAddrs)
@@ -115,51 +206,56 @@ def save_sqlite3(mailboxes, myAddrs=None, dbfile='maildir.db',
     for md in mailboxes:
         mboxName = os.path.basename(md._path)
         print 'saving %d messages: %s' % (len(md), mboxName)
-        for m in md:
-            if len(m) == 0: # no headers??
-                continue
-            received = m.get('received', None)
-            if received: # sent to me
-                fromMe = False
-            else:
-                origin = email.utils.getaddresses(m.get_all('from', []))
-                origin = frozenset([t[1].lower() for t in origin])
-                if not origin.isdisjoint(myAddrs):
-                    fromMe = True # sent by me
-                else:
-                    recipients = get_all_recipients(m)
-                    recipients = frozenset([t[1].lower() for t in recipients])
-                    if not recipients.isdisjoint(myAddrs):
-                        fromMe = False # sent to me
-                    else:
-                        fromMe = None # can't tell if I sent this...
-            try:
-                t = email.utils.parsedate_tz(m['date'])
-                if not t:
-                    raise KeyError
-                u = time.mktime(t[:9])
-                if t[9]:
-                    date = datetime.datetime.fromtimestamp(u - t[9])
-                else:
-                    date = datetime.datetime.fromtimestamp(u + defaultTZ)
-            except (ValueError,KeyError):
-                date = None
-            flags = m.get_flags()
-            d = {}
-            for k,v in m.items():
-                try:
-                    d[k.lower()] = unicode(v)
-                except UnicodeDecodeError:
-                    d[k.lower()] = 'unknown encoding'
-            headers = json.dumps(d)
-            try:
-                c.execute('insert into messages values (NULL,?,?,?,?,?,?,?,?)',
-                          (m['message-id'], mboxName, date, flags, received, 
-                           fromMe, d.get('subject', None), headers))
-                conn.commit()
-            except sqlite3.IntegrityError:
-                pass
+        save_messages(c, md.iteritems(), myAddrs=myAddrs, mboxName=mboxName,
+                      tableName=tableName, **kwargs)
+        conn.commit()
     c.close()
+
+def save_messages(c, messages, defaultTZ=7*3600, from_me_f=is_from_me, 
+                  fromMe=None, myAddrs=None, mboxName=None, serverID=0,
+                  verdict=None, tableName='messages'):
+    for serverMsg,m in messages:
+        if len(m) == 0: # no headers??
+            continue
+        if callable(from_me_f):
+            fromMe = from_me_f(m, myAddrs)
+        try:
+            t = email.utils.parsedate_tz(m['date'])
+            if not t:
+                raise KeyError
+            u = time.mktime(t[:9])
+            if t[9]:
+                date = datetime.datetime.fromtimestamp(u - t[9])
+            else:
+                date = datetime.datetime.fromtimestamp(u + defaultTZ)
+        except (ValueError,KeyError):
+            date = None
+        try:
+            flags = m.get_flags()
+        except AttributeError:
+            try:
+                imapFlags = m._imapFlags
+            except AttributeError:
+                flags = None
+            else:
+                flags = 'IMAP:' + ','.join(imapFlags)
+        d = {}
+        for k,v in m.items():
+            try:
+                d[k.lower()] = unicode(v)
+            except UnicodeDecodeError:
+                d[k.lower()] = 'unknown encoding'
+        headers = json.dumps(d)
+        try:
+            c.execute('insert or ignore into %s values (NULL,?,?,?,NULL,"NEW",?,?,?,?,?,?,?,?,?)'
+                      % tableName,
+                      (m['message-id'], serverID, serverMsg, 
+                       mboxName, date, flags,
+                       d.get('received', None), get_headers_sender(d),
+                       fromMe, d.get('subject', None), headers, verdict))
+            m.uid = c.lastrowid # save unique id
+        except sqlite3.IntegrityError:
+            pass
 
 def get_my_message_ids(c):
     c.execute('select id from messages where fromMe=1')
@@ -275,28 +371,106 @@ def subjects_roc(subjectDict, msgThread, maxDays=9999999):
         fpsum += 1 - tp
         l.append((timediff, tpsum / ntp, fpsum / nfp))
     return l, subjectFP, nfp / len(roc)
-            
 
-def get_references(c):
-    c.execute('select id,msgid,headers from messages')
+def extract_references(headers):            
+    references = headers.get('references', '').split()
+    try:
+        r = headers['in-reply-to']
+        if r not in references:
+            references.append(r)
+    except KeyError:
+        pass
+    return references
+
+class MsgThreadDict(object):
+    '''dict interface that takes message-id key and returns
+    (id,threadID,myThread)'''
+    def __init__(self, dbfile='maildir.db', tableName='threads'):
+        self.conn = sqlite3.connect(dbfile)
+        self.c = self.conn.cursor()
+        self.tableName = tableName
+    def __getitem__(self, msgID):
+        self.c.execute('select id,threadID,myThread from %s where msgid=?' 
+                       % self.tableName, (msgID,))
+        v = self.c.fetchone()
+        if v is None:
+            raise KeyError('msgID not found')
+        return v
+
+
+
+def get_references(c, newOnly=True, tableName='messages'):
+    'get {uid:[ref_msgid,]} refs and {msgid:uid} mapping'
+    if newOnly:
+        c.execute('select id,msgid,headers from %s where myThread="NEW"'
+                  % tableName)
+    else:
+        c.execute('select id,msgid,headers from %s' % tableName)
     uidDict = {}
     msgDict = {}
     for uid,msgID,headers in c.fetchall():
         if not headers:
             continue
         headers = json.loads(headers)
-        references = headers.get('references', '').split()
-        try:
-            r = headers['in-reply-to']
-            if r not in references:
-                references.append(r)
-        except KeyError:
-            pass
+        references = extract_references(headers)
         if references:
             uidDict[uid] = references
         if msgID:
             msgDict[msgID] = uid
     return uidDict, msgDict
+
+def get_thread_graph(c, tableName='messages'):
+    c.execute('select id,msgid,threadID from %s' % tableName)
+    msgGraph = {}
+    msgDict = {}
+    for uid,msgID,threadID in c.fetchall():
+        if threadID is not None and threadID != uid:
+            uid2 = threadID
+            msgGraph.setdefault(uid, set()).add(uid2)
+            msgGraph.setdefault(uid2, set()).add(uid)
+        if msgID:
+            msgDict[msgID] = uid
+    return msgGraph, msgDict
+
+def get_dup_msgids(c, tableName='messages'):
+    c.execute('select min(m1.id),m2.id from %s m1, %s m2 where m1.id<m2.id and m1.msgid is not null and m1.msgid=m2.msgid group by m2.id'
+              % (tableName,tableName))
+    return c.fetchall()
+
+def delete_dups(c, dups, tableName='messages'):
+    for uid,uid2 in dups:
+        c.execute('delete from %s where id=?' % tableName, (uid2,))
+
+def add_dup_edges(dups, msgGraph=None):
+    if msgGraph is None:
+        msgGraph = {}
+    for uid,uid2 in dups:
+        msgGraph.setdefault(uid, set()).add(uid2)
+        msgGraph.setdefault(uid2, set()).add(uid)
+    return msgGraph
+
+def filter_thread_dups(threadMsgs, dupSet):
+    r = {}
+    for k,v in threadMsgs.items():
+        v = filter(lambda uid: uid not in dupSet, v)
+        if len(v) > 1:
+            v.sort()
+            r[v[0]] = v
+    return r
+
+def update_message_threads(c, threadMsgs, myThreads=None, tableName='messages',
+                           erase=True):
+    if erase: # erase existing data
+        c.execute('update %s set threadID=NULL,myThread=NULL' % tableName)
+    for threadID, msgs in threadMsgs.items():
+        if myThreads is not None:
+            myThread = threadID in myThreads
+        else:
+            myThread = None
+        for uid in msgs:
+            c.execute('update %s set threadID=?,myThread=? where id=?' 
+                      % tableName, (msgs[0], myThread, uid))
+    
 
 def build_graph(uidDict, msgDict, msgGraph=None):
     if msgGraph is None:
@@ -336,9 +510,29 @@ def get_my_threads(myMsgs, msgThread):
             pass
     return myThreads
 
-def get_sender_counts(c, msgThread, myThreads):
+def reanalyze_threads(c):
+    'add new messages to existing thread graph'
+    print 'reanalyzing thread graph...'
+    msgGraph, msgDict = get_thread_graph(c) # get old graph edges
+    refsDict = get_references(c)[0] # get new graph edges
+    msgGraph = build_graph(refsDict, msgDict, msgGraph)
+    threadMsgs, msgThread = get_threads(msgGraph) # clique analysis
+    myMsgs = get_my_message_ids(c)
+    myThreads = get_my_threads(myMsgs, msgThread) # threads I participated in
+    print 'updating threads db...'
+    update_message_threads(c, threadMsgs, myThreads)
+    print 'analyzing addr counts...'
+    addrCounts = get_sender_counts(iter_senders(c), msgThread, myThreads)
+    low, high = get_sender_pvals(addrCounts)
+    print 'updating addrs db...'
+    create_addrs_table(c)
+    save_addrs(c, high)
+    create_addrs_table(c, 'junkaddrs')
+    save_addrs(c, low, 'junkaddrs')
+    return threadMsgs, msgThread, myThreads, low, high
+
+def iter_senders(c):
     c.execute('select id,headers from messages where fromMe=0 and msgid is not null and subject is not null')
-    addrCounts = {}
     for uid, headers in c.fetchall():
         if not headers:
             continue
@@ -349,8 +543,13 @@ def get_sender_counts(c, msgThread, myThreads):
             pass
         t = email.utils.parseaddr(fromAddrs)
         sender = t[1].lower()
-        if not sender:
-            continue
+        if sender:
+            yield uid, sender
+
+def get_sender_counts(senders, msgThread, myThreads, addrCounts=None):
+    if addrCounts is None:
+        addrCounts = {}
+    for uid,sender in senders:
         if msgThread.get(uid, None) in myThreads:
             v = 1
         else:

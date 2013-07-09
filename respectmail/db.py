@@ -501,13 +501,21 @@ def get_threads(msgGraph):
             thread_dfs(uid, uid, msgThread, threadMsgs, msgGraph)
     return threadMsgs, msgThread
 
-def get_my_threads(myMsgs, msgThread):
+def get_my_threads(c, myMsgs, msgThread):
     myThreads = set()
-    for i in myMsgs:
+    def add_msg(uid):
         try:
-            myThreads.add(msgThread[i])
+            myThreads.add(msgThread[uid])
         except KeyError:
             pass
+    for i in myMsgs: # messages from me
+        add_msg(i)
+    c.execute('select id from messages where flags not null and flags not like "IMAP:%" and (flags like "%P%" or flags like "%R%")')
+    for t in c.fetchall(): # maildir messages I answered or forwarded
+        add_msg(t[0])
+    c.execute('select id from messages where flags like "IMAP%\\Answered%" or flags like "IMAP%$Forwarded%"')
+    for t in c.fetchall(): # IMAP messages I answered or forwarded
+        add_msg(t[0])
     return myThreads
 
 def reanalyze_threads(c):
@@ -518,7 +526,7 @@ def reanalyze_threads(c):
     msgGraph = build_graph(refsDict, msgDict, msgGraph)
     threadMsgs, msgThread = get_threads(msgGraph) # clique analysis
     myMsgs = get_my_message_ids(c)
-    myThreads = get_my_threads(myMsgs, msgThread) # threads I participated in
+    myThreads = get_my_threads(c, myMsgs, msgThread) # threads I participated in
     print 'updating threads db...'
     update_message_threads(c, threadMsgs, myThreads)
     print 'analyzing addr counts...'

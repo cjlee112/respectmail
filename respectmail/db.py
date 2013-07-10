@@ -8,6 +8,7 @@ import datetime
 from math import log, exp, isnan
 from scipy import special, stats
 import numpy
+#import warnings
 
 
 class TriageDB(object):
@@ -18,6 +19,7 @@ class TriageDB(object):
             create_messages_table(self.cursor)
             create_addrs_table(self.cursor)
             create_addrs_table(self.cursor, 'junkaddrs')
+            create_addrs_table(self.cursor, 'verdictaddrs')
             save_myaddrs_table(self.cursor, myAddrs)
             save_myaddrs_table(self.cursor, tableName='notjunk')
             save_myaddrs_table(self.cursor, tableName='vip')
@@ -39,10 +41,19 @@ class TriageDB(object):
                       myAddrs=self.myAddrs, serverID=serverID, **kwargs)
         self.conn.commit()
 
+    def save_verdicts(self, msgHeaders, mailbox, verdict):
+        'user has triaged messages to mailbox, so record that verdict'
+        save_verdicts(self.cursor, msgHeaders, mailbox, verdict)
+        self.conn.commit()
+
     def update_threads(self):
-        'extend thread analysis to NEW messages'
+        'extend thread analysis to NEW messages and verdicts'
         self.threadMsgs, self.msgThread, self.myThreads, self.low, self.high = \
             reanalyze_threads(self.cursor)
+        self.conn.commit()
+        self.verdicts = get_sender_verdicts(self.cursor)
+        create_addrs_table(self.cursor, 'verdictaddrs')
+        save_addrs(self.cursor, self.verdicts, 'verdictaddrs')
         self.conn.commit()
 
     def get_triage(self, requestP=0.05, junkP=0.05, fyiReplies=1):
@@ -87,12 +98,20 @@ def jost_pvalue(pvalues):
     m = logR.max()
     return exp(logk + m + log(numpy.exp(logR - m).sum()))
 
-def get_junkaddrs(c, p=0.05, maxreply=0, tableName='junkaddrs'):
+def get_junkaddrs(c, p=0.05, maxreply=0, tableName='junkaddrs',
+                  verdictTable='verdictaddrs'):
     c.execute('select email from notjunk')
     notjunk = frozenset([t[0] for t in c.fetchall()])
     c.execute('select email from %s where pval<? and nrelevant<=?'
               % tableName, (p, maxreply))
-    return frozenset([t[0] for t in c.fetchall() if t[0] not in notjunk])
+    junkaddrs = set([t[0] for t in c.fetchall() if t[0] not in notjunk])
+    if verdictTable:
+        c.execute('select email from %s where pval<? and nrelevant<=?' 
+                  % verdictTable, (log(p / (1. - p)), maxreply))
+        for t in c.fetchall():
+            if t[0] not in notjunk:
+                junkaddrs.add(t[0])
+    return junkaddrs
 
 def get_addrs(c, query='where pval<0.05', tableName='addrs'):
     'get set of addrs below specified p-value cutoff'
@@ -256,6 +275,20 @@ def save_messages(c, messages, defaultTZ=7*3600, from_me_f=is_from_me,
             m.uid = c.lastrowid # save unique id
         except sqlite3.IntegrityError:
             pass
+
+def save_verdicts(c, messages, mboxName, verdict, tableName='messages'):
+    'record user triage decision of messages'
+    for serverMsg,m in messages:
+        try:
+            msgID = m['message-id']
+        except KeyError:
+            continue
+        c.execute('update %s set serverMsg=?, mailbox=?, verdict=? where msgid=?'
+                  % tableName, (serverMsg, mboxName, verdict, msgID))
+        #if c.rowcount != 1:
+        #    warnings.warn('save_verdict: message-id %s not found or not unique, rowcount %d'
+        #                  % (msgID, c.rowcount))
+
 
 def get_my_message_ids(c):
     c.execute('select id from messages where fromMe=1')
@@ -585,6 +618,35 @@ def get_sender_pvals(addrCounts):
     low.sort()
     high.sort()
     return low, high
+
+def get_sender_verdicts(c, junkP=0.001, notjunkP=0.5, tableName='messages'):
+    '''compute log likelihood odds ratio for two competing models notjunk/junk
+    notjunk address: email will be kept (triaged) with likelihood notjunkP
+    junk address: email will be kept (triaged) with likelihood junkP.
+    returns [(LOD, m, n, address)] sorted with junk (lowest LOD) first'''
+    keptLOD = log(notjunkP / junkP) # log likelihood odds ratio for kept email
+    trashLOD = log((1. - notjunkP) / (1. - junkP)) # LLODR for trashed email
+    addrs = []
+    def save_data(a, k, t):
+        addrs.append((k * keptLOD + t * trashLOD, k, t + k, a))
+    c.execute('select sender, verdict from %s where verdict not null and myThread is not "NEW" order by sender' 
+              % tableName)
+    lastSender = None
+    for sender, verdict in c.fetchall():
+        if sender != lastSender:
+            if lastSender:
+                save_data(lastSender, kept, trashed)
+            lastSender = sender
+            kept = trashed = 0
+        if verdict:
+            kept += 1
+        else:
+            trashed += 1
+    if lastSender:
+        save_data(lastSender, kept, trashed)
+    addrs.sort()
+    return addrs
+
 
 def get_word_counts(subjectDict, msgThread, myThreads, n=1):
     d = {}

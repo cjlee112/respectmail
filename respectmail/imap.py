@@ -27,6 +27,8 @@ class IMAPServer(object):
         self.server.login(user, password)
         self.mboxlist = mboxlist
         self.serverID = serverID
+        self.host = host
+        self.user = user
 
     def create_mailboxes(self):
         'ensure that our standard mailboxes exist'
@@ -48,7 +50,14 @@ class IMAPServer(object):
                               serverID=self.serverID, verdict=SENT)
         msgLists.append(msgHeaders)
         self.msgLists = msgLists
-        
+        # update verdicts based on last round of triage by user
+        msgHeaders = get_headers(self.server, self.mboxlist[REQUESTS])
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[REQUESTS], REQUESTS)
+        msgHeaders = get_headers(self.server, self.mboxlist[FYI])
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
+        msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED)
+
     def triage(self, triageDB):
         requestAddrs, fyiAddrs, junkAddrs = triageDB.get_triage()
         fromBox = self.mboxlist[INBOX]
@@ -85,7 +94,7 @@ class IMAPServer(object):
         if addrs:
             msgHeaders = filter_mail(msgHeaders, addrs)
         if not msgHeaders:
-            return
+            return ()
         print 'Triaging %d messages to %s...' % (len(msgHeaders), toBox)
         move_messages(self.server, msgHeaders, fromBox, toBox)
         triageDB.save_moves(msgHeaders, toBox)

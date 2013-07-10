@@ -82,7 +82,8 @@ that were correct predictions to the corresponding folder
 (i.e. Requests, FYI or Closed), or to whatever is the correct
 location.  You can simply delete (or Junk, or archive, or whatever)
 any messages that are not of interest to you.
-Do the same thing for the "indeterminate" messages remaining in
+
+Do the same assessment for the "indeterminate" messages remaining in
 your INBOX.
 
 Rerun the respectmail triage whenever you need to.

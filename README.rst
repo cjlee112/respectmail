@@ -1,6 +1,6 @@
 
-Respect Mail
-------------
+RespectMail
+-----------
 
 In a world of junk mail, you deserve a little respect...
 
@@ -8,10 +8,10 @@ RespectMail is an automatic email triage tool that works with
 any IMAP server(s) you use.  It splits incoming email on the IMAP server
 into several triage folders:
 
-* Requests: messages that you are likely to answer
+* requests: messages that you are likely to answer
 * FYI: messages that you may need to answer
-* Closed: messages you've already answered
-* Junk: messages from addresses that you always ignore
+* closed: messages you've already answered
+* junk: messages from addresses that you always ignore
 * messages where no clear determination is possible are left in
   your INBOX, for you to deal with.
 
@@ -58,7 +58,7 @@ initial setup
 * write a ``config.py`` file that specifies what IMAP servers you
   want to triage::
 
-    from respectmail import IMAPServer
+    from respectmail import imap
     mailServers = [
       imap.IMAPServer('imap.example.com', 'me')
       imap.IMAPServer('imap.gmail.com', 'me@gmail.com', serverID=2),
@@ -94,11 +94,11 @@ Why Did I Start This?
 PROBLEM: my various email programs (Apple Mail, Gmail) were so full of
 junk mail that it was getting hard to find the messages I actually care
 about.  I ended up having to switch from a blacklisting strategy
-(list the address you don't want to see) to a pure whitelisting
+(list the addresses you don't want to see) to a pure whitelisting
 strategy (only show emails from the list of addresses explicitly
 cleared as valid).  The blacklist would grow infinitely;
 only the whitelist is finite...
-The fundatmental problem is that essentially every organization we deal with
+The fundamental problem is that essentially every organization we deal with
 (in my case ranging
 from my employer, UCLA, to every journal, group or company I've ever
 had contact with) is vigorously deluging us with junk mail.  But

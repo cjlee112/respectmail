@@ -87,7 +87,7 @@ class IMAPServer(object):
                               [t for t in msgHeaders if t[0] in msgSet],
                                triageDB,
                               fromBox, self.mboxlist[JUNKTRIAGE])
-        msgSet -= frozenset([t[0] for t in fyi])
+        msgSet -= frozenset([t[0] for t in junk])
         print 'Triage done: %d messages left in %s.' % (len(msgSet), fromBox)
 
     def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):

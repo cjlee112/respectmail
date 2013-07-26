@@ -23,6 +23,7 @@ class TriageDB(object):
             save_myaddrs_table(self.cursor, myAddrs)
             save_myaddrs_table(self.cursor, tableName='notjunk')
             save_myaddrs_table(self.cursor, tableName='vip')
+            save_myaddrs_table(self.cursor, tableName='blacklist')
             self.conn.commit()
         myAddrs = set()
         self.cursor.execute('select * from myaddrs')
@@ -61,13 +62,20 @@ class TriageDB(object):
         requestAddrs = frozenset([t[3] for t in self.high if t[0] < requestP])
         fyiAddrs = frozenset([t[3] for t in self.high if t[1] >= fyiReplies])
         junkAddrs = get_junkaddrs(self.cursor, junkP)
-        return requestAddrs, fyiAddrs, junkAddrs
+        blackAddrs = get_blacklist(self.cursor)
+        return requestAddrs, fyiAddrs, junkAddrs, blackAddrs
 
     def save_moves(self, msgHeaders, toBox='Junk', tableName='messages'):
         'record mailbox move for the set of messages'
         for j,msg in msgHeaders:
             self.cursor.execute('update %s set mailbox=?,serverMsg=NULL where id=?'
                                 % tableName, (toBox, msg.uid))
+        self.conn.commit()
+
+    def blacklist(self, msgHeaders, blacklistTable='blacklist'):
+        'add senders of these messages to our blacklist'
+        bl = [get_headers_sender(t[1]) for t in msgHeaders]
+        save_myaddrs_table(self.cursor, bl, blacklistTable)
         self.conn.commit()
 
 
@@ -112,6 +120,16 @@ def get_junkaddrs(c, p=0.05, maxreply=0, tableName='junkaddrs',
             if t[0] not in notjunk:
                 junkaddrs.add(t[0])
     return junkaddrs
+
+def get_blacklist(c, blacklistTable='blacklist'):
+    c.execute('select email from notjunk')
+    notjunk = frozenset([t[0] for t in c.fetchall()])
+    blackaddrs = set()
+    c.execute('select email from %s' % blacklistTable)
+    for t in c.fetchall():
+        if t[0] not in notjunk:
+            blackaddrs.add(t[0])
+    return blackaddrs
 
 def get_addrs(c, query='where pval<0.05', tableName='addrs'):
     'get set of addrs below specified p-value cutoff'
@@ -181,7 +199,7 @@ def save_myaddrs_table(c, myAddrs=(), tableName='myaddrs'):
     c.execute('''create table if not exists %s
             (email text primary key)''' % tableName)
     for a in myAddrs:
-        c.execute('insert into myaddrs values (?)', (a,))
+        c.execute('insert or ignore into %s values (?)' % tableName, (a,))
 
 def get_all_recipients(m):
     tos = m.get_all('to', [])

@@ -13,12 +13,14 @@ REQUESTSTRIAGE = 6
 FYITRIAGE = 7
 CLOSEDTRIAGE = 8
 JUNKTRIAGE = 9
+BLACKLIST = 10
 
 class IMAPServer(object):
     def __init__(self, host, user, password=None, ssl=True, serverID=1,
                  mboxlist=('INBOX', 'Sent', 'Junk', 'Requests', 'FYI',
                            'Closed', 'RequestsTriage', 'FYITriage',
-                           'ClosedTriage', 'JunkTriage'), **kwargs):
+                           'ClosedTriage', 'JunkTriage', 'Blacklist'), 
+                 **kwargs):
         'connect to imap server'
         self.server = IMAPClient(host, ssl=ssl, **kwargs)
         if password is None:
@@ -38,7 +40,7 @@ class IMAPServer(object):
                 response = self.server.create_folder(mbox)
                 print 'Created', mbox, response
 
-    def get_updates(self, triageDB):
+    def get_updates(self, triageDB, expunge=True):
         'get INBOX, SENT headers; save to triageDB'
         msgLists = []
         msgHeaders = get_headers(self.server, self.mboxlist[INBOX])
@@ -57,9 +59,16 @@ class IMAPServer(object):
         triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
         msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED)
+        msgHeaders = get_headers(self.server, self.mboxlist[BLACKLIST])
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[BLACKLIST], BLACKLIST)
+        triageDB.blacklist(msgHeaders)
+        self.server.delete_messages([t[0] for t in msgHeaders])
+        if expunge:
+            self.server.expunge()
 
     def triage(self, triageDB):
-        requestAddrs, fyiAddrs, junkAddrs = triageDB.get_triage()
+        'triage inbox to request, fyi, junk, blacklist mboxes'
+        requestAddrs, fyiAddrs, junkAddrs, blackAddrs = triageDB.get_triage()
         fromBox = self.mboxlist[INBOX]
         msgHeaders = self.msgLists[INBOX]
         msgSet = set([t[0] for t in msgHeaders])
@@ -83,6 +92,11 @@ class IMAPServer(object):
                               triageDB,
                               fromBox, self.mboxlist[FYITRIAGE])
         msgSet -= frozenset([t[0] for t in fyi])
+        black = self._do_triage(blackAddrs,
+                                [t for t in msgHeaders if t[0] in msgSet],
+                                triageDB,
+                                fromBox, self.mboxlist[BLACKLIST])
+        msgSet -= frozenset([t[0] for t in black])
         junk = self._do_triage(junkAddrs,
                               [t for t in msgHeaders if t[0] in msgSet],
                                triageDB,
@@ -91,6 +105,7 @@ class IMAPServer(object):
         print 'Triage done: %d messages left in %s.' % (len(msgSet), fromBox)
 
     def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):
+        'move msgs from the specified addrs to toBox'
         if addrs:
             msgHeaders = filter_mail(msgHeaders, addrs)
         if not msgHeaders:
@@ -99,6 +114,19 @@ class IMAPServer(object):
         move_messages(self.server, msgHeaders, fromBox, toBox)
         triageDB.save_moves(msgHeaders, toBox)
         return msgHeaders
+
+    def _rescue_update(self, triageDB):
+        'recreate last update state (without any db change), ready for triage'
+        msgHeaders = get_headers(self.server, self.mboxlist[INBOX])
+        l = []
+        for j,msg in msgHeaders:
+            triageDB.cursor.execute('select id from messages where msgid=?',
+                                    (msg['message-id'],))
+            t = triageDB.cursor.fetchone()
+            if t is not None:
+                msg.uid = t[0]
+                l.append((j,msg))
+        self.msgLists = [l]
         
 def get_from(msg):
     origin = email.utils.getaddresses(msg.get_all('from', []))

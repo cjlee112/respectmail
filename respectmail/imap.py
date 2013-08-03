@@ -1,4 +1,4 @@
-from imapclient import IMAPClient
+from imapclient import IMAPClient, SEEN
 import email
 import warnings
 from getpass import getpass
@@ -18,8 +18,8 @@ BLACKLIST = 10
 class IMAPServer(object):
     def __init__(self, host, user, password=None, ssl=True, serverID=1,
                  mboxlist=('INBOX', 'Sent', 'Junk', 'Requests', 'FYI',
-                           'Closed', 'RequestsTriage', 'FYITriage',
-                           'ClosedTriage', 'JunkTriage', 'Blacklist'), 
+                           'Closed', 'Requests', 'FYI',
+                           'Closed', 'JunkTriage', 'Blacklist'), 
                  **kwargs):
         'connect to imap server'
         self.server = IMAPClient(host, ssl=ssl, **kwargs)
@@ -139,6 +139,7 @@ def filter_mail(msgHeaders, addrs):
 def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]'):
     'retrieve headers for a mailbox, return as [(serverID,message_obj),]'
     server.select_folder(mailbox)
+    unseen = server.search('UNSEEN') # preserve UNSEEN state
     msgList = server.search(['NOT DELETED'])
     msgHeaders = []
     for i in range(0, len(msgList), maxreq):
@@ -151,6 +152,7 @@ def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]'):
             else:
                 msg._imapFlags = m['FLAGS']
                 msgHeaders.append((j,msg))
+    server.remove_flags(unseen, [SEEN]) # reset back to unseen state
     return msgHeaders
 
 

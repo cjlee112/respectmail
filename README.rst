@@ -8,10 +8,11 @@ RespectMail is an automatic email triage tool that works with
 any IMAP server(s) you use.  It splits incoming email on the IMAP server
 into several triage folders:
 
-* requests: messages that you are likely to answer
+* Requests: messages that you are likely to answer
 * FYI: messages that you may need to answer
-* closed: messages you've already answered
-* junk: messages from addresses that you always ignore
+* Closed: messages you've already answered
+* JunkTriage: messages from addresses that you generally ignore
+* Blacklist: messages from addresses that you never want to read
 * messages where no clear determination is possible are left in
   your INBOX, for you to deal with.
 
@@ -23,9 +24,10 @@ currently from the following possible sources:
 * Apple Mail database of old messages (by way of converting it to Maildir);
 * IMAP server(s);
 * your curation of its triage predictions.  You do this simply by moving
-  messages from a triage folder (e.g. RequestsTriage) to a "final verdict"
-  folder (e.g. Requests), (or simply deleting messages that are not
-  of interest to you), using whatever mail client you want.
+  miscategorized messages from a triage folder (e.g. Requests)
+  to the correct "final verdict" folder,
+  or simply deleting messages that are not
+  of interest to you.  You do this using whatever mail client you want.
 
 RespectMail's predictions will get better and better as
 it accumulates more and more historical data on what you consider
@@ -71,20 +73,34 @@ Assuming the sqlite3 database file (by default ``maildir.db``)
 is in your current directory, you run a triage on all your IMAP
 servers via::
 
-  python /path/to/respectmail/triage.py
+  python -i /path/to/respectmail/triage.py
 
 It will ask you for IMAP server password(s), get INBOX and Sent
-mail headers, analyze data and perform the triage.
+mail headers, analyze data and perform the triage.  It tells you
+how many messages it triaged to each category, and how many were
+indeterminate (left in your INBOX).  I typically run this in
+interactive mode (-i) so I can manually inspect / resume the
+triage process if something goes wrong (this is alpha code!).
 
 You should then use your regular email client to look at the
-folders RequestsTriage, FYITriage and ClosedTriage.  Move messages
-that were correct predictions to the corresponding folder
-(i.e. Requests, FYI or Closed), or to whatever is the correct
-location.  You can simply delete (or Junk, or archive, or whatever)
-any messages that are not of interest to you.
+folders Requests, FYI and Closed.  For messages
+that were incorrectly categorized, move them to the right
+folder.  If a message is not of interest to you, pick between
+the following options:
+
+* Blacklist: if you never want to see messages from this sender
+  again, move the message to the Blacklist folder.
+* if the message is not of interest to you, but you don't want to
+  blacklist the sender, either move it to Junk or simply delete it.
 
 Do the same assessment for the "indeterminate" messages remaining in
-your INBOX.
+your INBOX.  
+
+Messages that are unlikely to be of interest to you (but not
+blacklisted) are triaged to JunkTriage.  If you wish, you can inspect this 
+folder and recategorize messages if necessary.
+
+
 
 Rerun the respectmail triage whenever you need to.
 

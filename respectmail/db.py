@@ -47,12 +47,12 @@ class TriageDB(object):
         save_verdicts(self.cursor, msgHeaders, mailbox, verdict)
         self.conn.commit()
 
-    def update_threads(self):
+    def update_threads(self, goodVerdicts):
         'extend thread analysis to NEW messages and verdicts'
         self.threadMsgs, self.msgThread, self.myThreads, self.low, self.high = \
             reanalyze_threads(self.cursor)
         self.conn.commit()
-        self.verdicts = get_sender_verdicts(self.cursor)
+        self.verdicts = get_sender_verdicts(self.cursor, goodVerdicts)
         create_addrs_table(self.cursor, 'verdictaddrs')
         save_addrs(self.cursor, self.verdicts, 'verdictaddrs')
         self.conn.commit()
@@ -637,7 +637,8 @@ def get_sender_pvals(addrCounts):
     high.sort()
     return low, high
 
-def get_sender_verdicts(c, junkP=0.001, notjunkP=0.5, tableName='messages'):
+def get_sender_verdicts(c, goodVerdicts, junkP=0.001, notjunkP=0.5, 
+                        tableName='messages'):
     '''compute log likelihood odds ratio for two competing models notjunk/junk
     notjunk address: email will be kept (triaged) with likelihood notjunkP
     junk address: email will be kept (triaged) with likelihood junkP.
@@ -656,7 +657,7 @@ def get_sender_verdicts(c, junkP=0.001, notjunkP=0.5, tableName='messages'):
                 save_data(lastSender, kept, trashed)
             lastSender = sender
             kept = trashed = 0
-        if verdict:
+        if verdict in goodVerdicts:
             kept += 1
         else:
             trashed += 1

@@ -15,7 +15,7 @@ def do_triage():
     for s in servers:
         print 'getting updates from %s...' % s.host
         s.get_updates(triageDB)
-    triageDB.update_threads()
+    triageDB.update_threads((imap.REQUESTS, imap.FYI, imap.CLOSED))
     for s in servers:
         print 'triaging messages on %s...' % s.host
         s.triage(triageDB)

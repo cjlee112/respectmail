@@ -8,13 +8,17 @@ RespectMail is an automatic email triage tool that works with
 any IMAP server(s) you use.  It splits incoming email on the IMAP server
 into several triage folders:
 
-* Requests: messages that you are likely to answer
-* FYI: messages that you may need to answer
-* Closed: messages you've already answered
-* JunkTriage: messages from addresses that you generally ignore
-* Blacklist: messages from addresses that you never want to read
-* messages where no clear determination is possible are left in
-  your INBOX, for you to deal with.
+* **Requests**: messages that you are likely to answer
+* **FYI**: messages that you may need to answer
+* **Closed**: messages you've already answered or that require no action.
+* **JunkTriage**: messages from addresses that you generally ignore.
+* **Blacklist**: messages from addresses that you never want to see again.
+* **StrangersINBOX**: messages where no clear determination is possible are
+  moved here, for you to screen.  By default, any messages left here
+  at the time of the next triage will be *blacklisted*.
+  Hence, you should move relevant messages
+  to Requests, FYI or Closed, and simply delete any messages that 
+  you just want to ignore (but not blacklist).
 
 It bases this on statistical analysis of your email history
 (it reconstructs the thread structure of all your email conversations),
@@ -78,23 +82,25 @@ servers via::
 It will ask you for IMAP server password(s), get INBOX and Sent
 mail headers, analyze data and perform the triage.  It tells you
 how many messages it triaged to each category, and how many were
-indeterminate (left in your INBOX).  I typically run this in
+indeterminate (moved to StrangersINBOX).  Because I'm a paranoid
+software developer, I typically run this in
 interactive mode (-i) so I can manually inspect / resume the
-triage process if something goes wrong (this is alpha code!).
+triage process if something goes wrong, but that is in no
+way necessary.
 
 You should then use your regular email client to look at the
-folders Requests, FYI and Closed.  For messages
+folders Requests, FYI, Closed and StrangersINBOX.  For messages
 that were incorrectly categorized, move them to the right
 folder.  If a message is not of interest to you, pick between
 the following options:
 
 * Blacklist: if you never want to see messages from this sender
-  again, move the message to the Blacklist folder.
+  again, move the message to the Blacklist folder.  Note that
+  messages left in StrangersINBOX will be *automatically*
+  blacklisted at the time of the next triage, so you do not need
+  to move them to the Blacklist folder.
 * if the message is not of interest to you, but you don't want to
   blacklist the sender, either move it to Junk or simply delete it.
-
-Do the same assessment for the "indeterminate" messages remaining in
-your INBOX.  
 
 Messages that are unlikely to be of interest to you (but not
 blacklisted) are triaged to JunkTriage.  If you wish, you can inspect this 
@@ -102,7 +108,8 @@ folder and recategorize messages if necessary.
 
 
 
-Rerun the respectmail triage whenever you need to.
+Rerun the respectmail triage just before viewing your new
+incoming mail (using whatever IMAP client you like).
 
 
 Why Did I Start This?

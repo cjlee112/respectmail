@@ -14,12 +14,14 @@ FYITRIAGE = 7
 CLOSEDTRIAGE = 8
 JUNKTRIAGE = 9
 BLACKLIST = 10
+BLACKLISTTRIAGE = 11
 
 class IMAPServer(object):
     def __init__(self, host, user, password=None, ssl=True, serverID=1,
                  mboxlist=('INBOX', 'Sent', 'Junk', 'Requests', 'FYI',
                            'Closed', 'Requests', 'FYI',
-                           'Closed', 'JunkTriage', 'Blacklist'), 
+                           'Closed', 'JunkTriage', 'Blacklist',
+                           'StrangersINBOX',), 
                  **kwargs):
         'connect to imap server'
         self.server = IMAPClient(host, ssl=ssl, **kwargs)
@@ -59,7 +61,12 @@ class IMAPServer(object):
         triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
         msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED)
-        msgHeaders = get_headers(self.server, self.mboxlist[BLACKLIST])
+        self.get_blacklist_updates(self.mboxlist[BLACKLIST], triageDB, expunge)
+        self.get_blacklist_updates(self.mboxlist[BLACKLISTTRIAGE], triageDB,
+                                   expunge)
+    def get_blacklist_updates(self, mbox, triageDB, expunge=True):
+        'update blacklist verdicts based on user actions, and clear mbox'
+        msgHeaders = get_headers(self.server, mbox)
         triageDB.save_verdicts(msgHeaders, self.mboxlist[BLACKLIST], BLACKLIST)
         triageDB.blacklist(msgHeaders)
         self.server.delete_messages([t[0] for t in msgHeaders])
@@ -102,7 +109,11 @@ class IMAPServer(object):
                                triageDB,
                               fromBox, self.mboxlist[JUNKTRIAGE])
         msgSet -= frozenset([t[0] for t in junk])
-        print 'Triage done: %d messages left in %s.' % (len(msgSet), fromBox)
+        # move messages from strangers into BLACKLISTTRIAGE mbox
+        strangers = self._do_triage(None, 
+                                    [t for t in msgHeaders if t[0] in msgSet],
+                                    triageDB,
+                                    fromBox, self.mboxlist[BLACKLISTTRIAGE])
 
     def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):
         'move msgs from the specified addrs to toBox'

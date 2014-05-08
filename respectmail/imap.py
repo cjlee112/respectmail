@@ -61,6 +61,11 @@ class IMAPServer(object):
         triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
         msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED)
+        self.purge_blacklist(triageDB, expunge)
+
+    def purge_blacklist(self, triageDB, expunge=True):
+        '''treat all messages in BLACKLIST/TRIAGE as blacklisted:
+        save verdicts to triageDB, and expunge from imap server'''
         self.get_blacklist_updates(self.mboxlist[BLACKLIST], triageDB, expunge)
         self.get_blacklist_updates(self.mboxlist[BLACKLISTTRIAGE], triageDB,
                                    expunge)

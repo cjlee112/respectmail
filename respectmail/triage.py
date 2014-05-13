@@ -1,5 +1,6 @@
 import db
 import imap
+import send
 
 def do_triage():
     try:
@@ -19,10 +20,10 @@ def do_triage():
     for s in servers:
         print 'triaging messages on %s...' % s.host
         s.triage(triageDB)
-    return triageDB, servers
+    return triageDB, servers, getattr(config, 'smtpKwargs', {})
 
 if __name__ == '__main__':
-    triageDB, servers = do_triage()
+    triageDB, servers, smtpKwargs = do_triage()
     d = dict(btname=servers[0].mboxlist[imap.BLACKLISTTRIAGE],
              blname=servers[0].mboxlist[imap.BLACKLIST]) # get mbox names
     print '''
@@ -30,9 +31,11 @@ Please review messages in %(btname)s, and move or delete
 messages that you do NOT want to blacklist.  By default, messages left
 in %(btname)s will be blacklisted.
 ''' % d
-    confirm = raw_input('''When ready, enter Y to purge %(blname)s and %(btname)s
+    confirm = raw_input('''When ready, enter Y to purge %(blname)s and %(btname)s,
+    and SEND any :respect: template messages in Drafts
     (or any other key to postpone to later): ''' % d)
     if confirm.lower() == 'y':
+        send.send_all_templates(servers, **smtpKwargs)
         for srv in servers:
             print 'purging blacklisted messages from %s...' % srv.host
             srv.purge_blacklist(triageDB)

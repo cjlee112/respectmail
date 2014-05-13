@@ -143,6 +143,11 @@ class IMAPServer(object):
                 msg.uid = t[0]
                 l.append((j,msg))
         self.msgLists = [l]
+
+    def get_messages(self, mbox='Drafts'):
+        'get full-text email message objects'
+        return get_headers(self.server, mbox, data='RFC822', 
+                           preserveState=False)
         
 def get_from(msg):
     origin = email.utils.getaddresses(msg.get_all('from', []))
@@ -152,10 +157,12 @@ def filter_mail(msgHeaders, addrs):
     return [t for t in msgHeaders if not get_from(t[1]).isdisjoint(addrs)]
 
 
-def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]'):
+def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]',
+                preserveState=True):
     'retrieve headers for a mailbox, return as [(serverID,message_obj),]'
     server.select_folder(mailbox)
-    unseen = server.search('UNSEEN') # preserve UNSEEN state
+    if preserveState:
+        unseen = server.search('UNSEEN') # preserve UNSEEN state
     msgList = server.search(['NOT DELETED'])
     msgHeaders = []
     for i in range(0, len(msgList), maxreq):
@@ -168,7 +175,8 @@ def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]'):
             else:
                 msg._imapFlags = m['FLAGS']
                 msgHeaders.append((j,msg))
-    server.remove_flags(unseen, [SEEN]) # reset back to unseen state
+    if preserveState:
+        server.remove_flags(unseen, [SEEN]) # reset back to unseen state
     return msgHeaders
 
 

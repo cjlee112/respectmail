@@ -59,6 +59,9 @@ class TriageDB(object):
 
     def get_triage(self, requestP=0.05, junkP=0.05, fyiReplies=1):
         'get triage of email addresses into likely requests, fyi, junk sets'
+        if not hasattr(self, 'high'):
+            self.cursor.execute('select pval, nrelevant, ntotal, email from addrs')
+            self.high = self.cursor.fetchall()
         requestAddrs = frozenset([t[3] for t in self.high if t[0] < requestP])
         fyiAddrs = frozenset([t[3] for t in self.high if t[1] >= fyiReplies])
         junkAddrs = get_junkaddrs(self.cursor, junkP)
@@ -77,6 +80,18 @@ class TriageDB(object):
         bl = [get_headers_sender(t[1]) for t in msgHeaders]
         save_myaddrs_table(self.cursor, bl, blacklistTable)
         self.conn.commit()
+
+    def _load_threads(self, tableName='messages'):
+        'get thread mapping and set of my threads from db'
+        self.cursor.execute('select id, threadID from %s where threadID is not null' % tableName)
+        d = {}
+        for uid, threadID in self.cursor.fetchall():
+            d[uid] = threadID
+        self.msgThread = d
+        self.cursor.execute('select threadID from %s where fromMe=1 and threadID is not null'
+                            % tableName)
+        self.myThreads = set([t[0] for t in self.cursor.fetchall()])
+
 
 
 def iter_mailboxes(mailDir):
@@ -256,6 +271,7 @@ def save_messages(c, messages, defaultTZ=7*3600, from_me_f=is_from_me,
             continue
         if callable(from_me_f):
             fromMe = from_me_f(m, myAddrs)
+        m.fromMe = fromMe # save flag on message object
         try:
             t = email.utils.parsedate_tz(m['date'])
             if not t:
@@ -710,3 +726,28 @@ def get_counts(mailDir):
     return addrCounts
 
             
+def get_answered_messages(c, tableName='messages'):
+    'get unclosed messages with subsequent message fromMe in same thread'
+    c.execute('select t1.id, t1.msgID from %s t1, %s t2 where t2.fromMe=1 and t1.threadID=t2.threadID and t1.date < t2.date and t1.mailbox!="Closed" and t1.mailbox!="Sent" and t1.serverID>0' 
+              % (tableName, tableName))
+    d = {}
+    for uid, msgID in c.fetchall():
+        d[msgID] = uid
+    return d
+
+def filter_message_ids(msgHeaders, msgDict):
+    'filter messages in msgHeaders by msgIDs in msgDict'
+    l = []
+    for serverMsg,m in msgHeaders:
+        try:
+            msgID = m['message-id']
+            m.uid = msgDict[msgID]
+        except KeyError:
+            continue
+        else:
+            l.append((serverMsg, m))
+    return l
+
+        
+
+    

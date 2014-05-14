@@ -2,6 +2,7 @@ from imapclient import IMAPClient, SEEN
 import email
 import warnings
 from getpass import getpass
+import db
 
 INBOX = 0
 SENT = 1
@@ -30,6 +31,7 @@ class IMAPServer(object):
                                (user, host))
         self.server.login(user, password)
         self.mboxlist = mboxlist
+        self.msgLists = {}
         self.serverID = serverID
         self.host = host
         self.user = user
@@ -44,21 +46,22 @@ class IMAPServer(object):
 
     def get_updates(self, triageDB, expunge=True):
         'get INBOX, SENT headers; save to triageDB'
-        msgLists = []
         msgHeaders = get_headers(self.server, self.mboxlist[INBOX])
         triageDB.save_headers(msgHeaders, self.mboxlist[INBOX],
                               serverID=self.serverID, verdict=INBOX)
-        msgLists.append(msgHeaders)
+        self.msgLists[INBOX] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[SENT])
-        triageDB.save_headers(msgHeaders, self.mboxlist[SENT], fromMe=True,
+        triageDB.save_headers(msgHeaders, self.mboxlist[SENT], 
+                              fromMe=True, from_me_f=None,
                               serverID=self.serverID, verdict=SENT)
-        msgLists.append(msgHeaders)
-        self.msgLists = msgLists
+        self.msgLists[SENT] = msgHeaders
         # update verdicts based on last round of triage by user
         msgHeaders = get_headers(self.server, self.mboxlist[REQUESTS])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[REQUESTS], REQUESTS)
+        self.msgLists[REQUESTS] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[FYI])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
+        self.msgLists[FYI] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED)
         self.purge_blacklist(triageDB, expunge)
@@ -84,7 +87,8 @@ class IMAPServer(object):
         fromBox = self.mboxlist[INBOX]
         msgHeaders = self.msgLists[INBOX]
         msgSet = set([t[0] for t in msgHeaders])
-        answered = [t for t in msgHeaders if '\\Answered' in t[1]._imapFlags]
+        answered = [t for t in msgHeaders 
+                    if '\\Answered' in t[1]._imapFlags or t[1].fromMe]
         self._do_triage(None, answered, triageDB, fromBox, 
                         self.mboxlist[CLOSEDTRIAGE])
         msgSet -= frozenset([t[0] for t in answered])
@@ -119,6 +123,17 @@ class IMAPServer(object):
                                     [t for t in msgHeaders if t[0] in msgSet],
                                     triageDB,
                                     fromBox, self.mboxlist[BLACKLISTTRIAGE])
+        self.close_answered(triageDB)
+
+    def close_answered(self, triageDB):
+        'move answered messages to CLOSED mailbox and update db'
+        answered = db.get_answered_messages(triageDB.cursor)
+        msgHeaders = db.filter_message_ids(self.msgLists[REQUESTS], answered)
+        self._do_triage(None, msgHeaders, triageDB, self.mboxlist[REQUESTS], 
+                        self.mboxlist[CLOSED])
+        msgHeaders = db.filter_message_ids(self.msgLists[FYI], answered)
+        self._do_triage(None, msgHeaders, triageDB, self.mboxlist[FYI], 
+                        self.mboxlist[CLOSED])
 
     def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):
         'move msgs from the specified addrs to toBox'
@@ -133,6 +148,8 @@ class IMAPServer(object):
 
     def _rescue_update(self, triageDB):
         'recreate last update state (without any db change), ready for triage'
+        if not hasattr(triageDB, 'myThreads'):
+            triageDB._load_threads()
         msgHeaders = get_headers(self.server, self.mboxlist[INBOX])
         l = []
         for j,msg in msgHeaders:
@@ -142,7 +159,11 @@ class IMAPServer(object):
             if t is not None:
                 msg.uid = t[0]
                 l.append((j,msg))
-        self.msgLists = [l]
+        self.msgLists[INBOX] = l
+        msgHeaders = get_headers(self.server, self.mboxlist[REQUESTS])
+        self.msgLists[REQUESTS] = msgHeaders
+        msgHeaders = get_headers(self.server, self.mboxlist[FYI])
+        self.msgLists[FYI] = msgHeaders
 
     def get_messages(self, mbox='Drafts'):
         'get full-text email message objects'

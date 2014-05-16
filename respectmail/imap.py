@@ -88,38 +88,33 @@ class IMAPServer(object):
         msgSet = set([t[0] for t in msgHeaders])
         answered = [t for t in msgHeaders 
                     if '\\Answered' in t[1]._imapFlags or t[1].fromMe]
-        self._do_triage(None, answered, triageDB, fromBox, 
+        self._do_triage(answered, triageDB, fromBox, 
                         self.mboxlist[CLOSEDTRIAGE])
         msgSet -= frozenset([t[0] for t in answered])
         requests = [t for t in msgHeaders if t[0] in msgSet and 
                     triageDB.msgThread.get(t[1].uid, None) 
                     in triageDB.myThreads]
-        self._do_triage(None, requests, triageDB, fromBox, 
+        self._do_triage(requests, triageDB, fromBox, 
                         self.mboxlist[REQUESTSTRIAGE])
         msgSet -= frozenset([t[0] for t in requests])
-        requests = self._do_triage(requestAddrs,
-                                   [t for t in msgHeaders if t[0] in msgSet],
-                                   triageDB,
-                                   fromBox, self.mboxlist[REQUESTSTRIAGE])
+        requests = self._do_triage([t for t in msgHeaders if t[0] in msgSet],
+                                   triageDB, fromBox, 
+                                   self.mboxlist[REQUESTSTRIAGE], requestAddrs)
         msgSet -= frozenset([t[0] for t in requests])
-        fyi = self._do_triage(fyiAddrs,
-                              [t for t in msgHeaders if t[0] in msgSet],
-                              triageDB,
-                              fromBox, self.mboxlist[FYITRIAGE])
+        fyi = self._do_triage([t for t in msgHeaders if t[0] in msgSet],
+                              triageDB, fromBox, 
+                              self.mboxlist[FYITRIAGE], fyiAddrs)
         msgSet -= frozenset([t[0] for t in fyi])
-        black = self._do_triage(blackAddrs,
-                                [t for t in msgHeaders if t[0] in msgSet],
-                                triageDB,
-                                fromBox, self.mboxlist[BLACKLIST])
+        black = self._do_triage([t for t in msgHeaders if t[0] in msgSet],
+                                triageDB, fromBox, 
+                                self.mboxlist[BLACKLIST], blackAddrs)
         msgSet -= frozenset([t[0] for t in black])
-        junk = self._do_triage(junkAddrs,
-                              [t for t in msgHeaders if t[0] in msgSet],
-                               triageDB,
-                              fromBox, self.mboxlist[JUNKTRIAGE])
+        junk = self._do_triage([t for t in msgHeaders if t[0] in msgSet],
+                               triageDB, fromBox, 
+                               self.mboxlist[JUNKTRIAGE], junkAddrs)
         msgSet -= frozenset([t[0] for t in junk])
         # move messages from strangers into BLACKLISTTRIAGE mbox
-        strangers = self._do_triage(None, 
-                                    [t for t in msgHeaders if t[0] in msgSet],
+        strangers = self._do_triage([t for t in msgHeaders if t[0] in msgSet],
                                     triageDB,
                                     fromBox, self.mboxlist[BLACKLISTTRIAGE])
         self.close_answered(triageDB)
@@ -128,14 +123,14 @@ class IMAPServer(object):
         'move answered messages to CLOSED mailbox and update db'
         answered = triageDB.get_answered_messages()
         msgHeaders = filter_message_ids(self.msgLists[REQUESTS], answered)
-        self._do_triage(None, msgHeaders, triageDB, self.mboxlist[REQUESTS], 
+        self._do_triage(msgHeaders, triageDB, self.mboxlist[REQUESTS], 
                         self.mboxlist[CLOSED])
         msgHeaders = filter_message_ids(self.msgLists[FYI], answered)
-        self._do_triage(None, msgHeaders, triageDB, self.mboxlist[FYI], 
+        self._do_triage(msgHeaders, triageDB, self.mboxlist[FYI], 
                         self.mboxlist[CLOSED])
 
-    def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):
-        'move msgs from the specified addrs to toBox'
+    def _do_triage(self, msgHeaders, triageDB, fromBox, toBox, addrs=None):
+        'move msgs (subset from addrs if specified) to toBox'
         if addrs:
             msgHeaders = filter_message_addrs(msgHeaders, addrs)
         if not msgHeaders:

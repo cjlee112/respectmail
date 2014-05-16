@@ -2,7 +2,6 @@ from imapclient import IMAPClient, SEEN
 import email
 import warnings
 from getpass import getpass
-import db
 
 INBOX = 0
 SENT = 1
@@ -127,18 +126,18 @@ class IMAPServer(object):
 
     def close_answered(self, triageDB):
         'move answered messages to CLOSED mailbox and update db'
-        answered = db.get_answered_messages(triageDB.cursor)
-        msgHeaders = db.filter_message_ids(self.msgLists[REQUESTS], answered)
+        answered = triageDB.get_answered_messages()
+        msgHeaders = filter_message_ids(self.msgLists[REQUESTS], answered)
         self._do_triage(None, msgHeaders, triageDB, self.mboxlist[REQUESTS], 
                         self.mboxlist[CLOSED])
-        msgHeaders = db.filter_message_ids(self.msgLists[FYI], answered)
+        msgHeaders = filter_message_ids(self.msgLists[FYI], answered)
         self._do_triage(None, msgHeaders, triageDB, self.mboxlist[FYI], 
                         self.mboxlist[CLOSED])
 
     def _do_triage(self, addrs, msgHeaders, triageDB, fromBox, toBox):
         'move msgs from the specified addrs to toBox'
         if addrs:
-            msgHeaders = filter_mail(msgHeaders, addrs)
+            msgHeaders = filter_message_addrs(msgHeaders, addrs)
         if not msgHeaders:
             return ()
         print 'Triaging %d messages to %s...' % (len(msgHeaders), toBox)
@@ -174,8 +173,22 @@ def get_from(msg):
     origin = email.utils.getaddresses(msg.get_all('from', []))
     return frozenset([t[1].lower() for t in origin])
 
-def filter_mail(msgHeaders, addrs):
+def filter_message_addrs(msgHeaders, addrs):
+    'filter messages to those from specified addrs'
     return [t for t in msgHeaders if not get_from(t[1]).isdisjoint(addrs)]
+
+def filter_message_ids(msgHeaders, msgDict):
+    'filter messages in msgHeaders by msgIDs in msgDict'
+    l = []
+    for serverMsg,m in msgHeaders:
+        try:
+            msgID = m['message-id']
+            m.uid = msgDict[msgID]
+        except KeyError:
+            continue
+        else:
+            l.append((serverMsg, m))
+    return l
 
 
 def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]',

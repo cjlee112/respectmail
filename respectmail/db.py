@@ -92,7 +92,8 @@ class TriageDB(object):
                             % tableName)
         self.myThreads = set([t[0] for t in self.cursor.fetchall()])
 
-
+    def get_answered_messages(self):
+        return get_answered_messages(self.cursor)
 
 def iter_mailboxes(mailDir):
     for fname in os.listdir(mailDir):
@@ -734,19 +735,6 @@ def get_answered_messages(c, tableName='messages'):
     for uid, msgID in c.fetchall():
         d[msgID] = uid
     return d
-
-def filter_message_ids(msgHeaders, msgDict):
-    'filter messages in msgHeaders by msgIDs in msgDict'
-    l = []
-    for serverMsg,m in msgHeaders:
-        try:
-            msgID = m['message-id']
-            m.uid = msgDict[msgID]
-        except KeyError:
-            continue
-        else:
-            l.append((serverMsg, m))
-    return l
 
         
 

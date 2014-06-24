@@ -42,9 +42,9 @@ class TriageDB(object):
                       myAddrs=self.myAddrs, serverID=serverID, **kwargs)
         self.conn.commit()
 
-    def save_verdicts(self, msgHeaders, mailbox, verdict):
+    def save_verdicts(self, msgHeaders, mailbox, verdict, overwrite=True):
         'user has triaged messages to mailbox, so record that verdict'
-        save_verdicts(self.cursor, msgHeaders, mailbox, verdict)
+        save_verdicts(self.cursor, msgHeaders, mailbox, verdict, overwrite)
         self.conn.commit()
 
     def update_threads(self, goodVerdicts):
@@ -311,15 +311,23 @@ def save_messages(c, messages, defaultTZ=7*3600, from_me_f=is_from_me,
         except sqlite3.IntegrityError:
             pass
 
-def save_verdicts(c, messages, mboxName, verdict, tableName='messages'):
+def save_verdicts(c, messages, mboxName, verdict, overwrite=True,
+                  tableName='messages'):
     'record user triage decision of messages'
     for serverMsg,m in messages:
         try:
             msgID = m['message-id']
         except KeyError:
             continue
-        c.execute('update %s set serverMsg=?, mailbox=?, verdict=? where msgid=?'
-                  % tableName, (serverMsg, mboxName, verdict, msgID))
+        if overwrite: # overwrite old verdict
+            c.execute('update %s set serverMsg=?, mailbox=?, verdict=? where msgid=?' % tableName, 
+                      (serverMsg, mboxName, verdict, msgID))
+        else: # save verdict iff not yet set
+            c.execute('update %s set serverMsg=?, mailbox=?, verdict=? where msgid=? and verdict is NULL' % tableName,
+                      (serverMsg, mboxName, verdict, msgID))
+            if c.rowcount == 0: # preserve old verdict
+                c.execute('update %s set serverMsg=?, mailbox=? where msgid=?' % tableName, 
+                          (serverMsg, mboxName, msgID))
         #if c.rowcount != 1:
         #    warnings.warn('save_verdict: message-id %s not found or not unique, rowcount %d'
         #                  % (msgID, c.rowcount))

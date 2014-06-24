@@ -47,7 +47,7 @@ class IMAPServer(object):
         'get INBOX, SENT headers; save to triageDB'
         msgHeaders = get_headers(self.server, self.mboxlist[INBOX])
         triageDB.save_headers(msgHeaders, self.mboxlist[INBOX],
-                              serverID=self.serverID, verdict=INBOX)
+                              serverID=self.serverID)
         self.msgLists[INBOX] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[SENT])
         triageDB.save_headers(msgHeaders, self.mboxlist[SENT], 
@@ -62,7 +62,8 @@ class IMAPServer(object):
         triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
         self.msgLists[FYI] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
-        triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED)
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED,
+                               overwrite=False)
         self.purge_blacklist(triageDB, expunge)
 
     def purge_blacklist(self, triageDB, expunge=True):

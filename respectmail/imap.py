@@ -244,6 +244,7 @@ class RobustClient(object):
         self._server.login(self._user, self._password)
     def _robust_call(self, funcName, *args, **kwargs):
         'perform IMAPClient call, restoring server connection if necessary'
+        topLevel = ('list_folders', 'create_folder', 'select_folder')
         while True:
             func = getattr(self._server, funcName)
             try:
@@ -257,13 +258,18 @@ class RobustClient(object):
                         raw_input('Reconnect failed. Check network and hit enter to retry...')
                     else:
                         break
+                if funcName not in topLevel: # must reconnect current folder
+                    self._server.select_folder(self._folder)
     # proxy the IMAPClient methods...
+    def select_folder(self, folder, *args, **kwargs):
+        'remember folder name in case we need to restore connection'
+        response = self._robust_call('select_folder', folder, *args, **kwargs)
+        self._folder = folder
+        return response
     list_folders = lambda self, *args, **kwargs: \
       self._robust_call('list_folders', *args, **kwargs)
     create_folder = lambda self, *args, **kwargs: \
       self._robust_call('create_folder', *args, **kwargs)
-    select_folder = lambda self, *args, **kwargs: \
-      self._robust_call('select_folder', *args, **kwargs)
     delete_messages = lambda self, *args, **kwargs: \
       self._robust_call('delete_messages', *args, **kwargs)
     expunge = lambda self, *args, **kwargs: \

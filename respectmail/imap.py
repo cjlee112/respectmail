@@ -2,6 +2,8 @@ from imapclient import IMAPClient, SEEN
 import email
 import warnings
 from getpass import getpass
+import socket
+import imaplib
 
 INBOX = 0
 SENT = 1
@@ -24,11 +26,7 @@ class IMAPServer(object):
                            'StrangersINBOX',), 
                  **kwargs):
         'connect to imap server'
-        self.server = IMAPClient(host, ssl=ssl, **kwargs)
-        if password is None:
-            password = getpass('Enter password for %s on %s:' %
-                               (user, host))
-        self.server.login(user, password)
+        self.server = RobustClient(host, user, password, ssl=ssl, **kwargs)
         self.mboxlist = mboxlist
         self.msgLists = {}
         self.serverID = serverID
@@ -227,6 +225,57 @@ def ensure_folder(server, foldername):
         if name == foldername:
             return False
     return server.create_folder(foldername)
+
+class RobustClient(object):
+    'IMAP connection that auto-retries after socket.error'
+    def __init__(self, host, user, password=None, *args, **kwargs):
+        self._host = host
+        self._user = user
+        if password is None:
+            password = getpass('Enter password for %s on %s:' %
+                               (user, host))
+        self._password = password
+        self._args = args
+        self._kwargs = kwargs
+        self._connect()
+    def _connect(self):
+        'login to IMAP server'
+        self._server = IMAPClient(self._host, *self._args, **self._kwargs)
+        self._server.login(self._user, self._password)
+    def _robust_call(self, funcName, *args, **kwargs):
+        'perform IMAPClient call, restoring server connection if necessary'
+        while True:
+            func = getattr(self._server, funcName)
+            try:
+                return func(*args, **kwargs)
+            except (socket.error,imaplib.abort):
+                print 'socket error for %s.  Retrying...' % self._host
+                while True:
+                    try:
+                        self._connect()
+                    except:
+                        raw_input('Reconnect failed. Check network and hit enter to retry...')
+                    else:
+                        break
+    # proxy the IMAPClient methods...
+    list_folders = lambda self, *args, **kwargs: \
+      self._robust_call('list_folders', *args, **kwargs)
+    create_folder = lambda self, *args, **kwargs: \
+      self._robust_call('create_folder', *args, **kwargs)
+    select_folder = lambda self, *args, **kwargs: \
+      self._robust_call('select_folder', *args, **kwargs)
+    delete_messages = lambda self, *args, **kwargs: \
+      self._robust_call('delete_messages', *args, **kwargs)
+    expunge = lambda self, *args, **kwargs: \
+      self._robust_call('expunge', *args, **kwargs)
+    search = lambda self, *args, **kwargs: \
+      self._robust_call('search', *args, **kwargs)
+    fetch = lambda self, *args, **kwargs: \
+      self._robust_call('fetch', *args, **kwargs)
+    remove_flags = lambda self, *args, **kwargs: \
+      self._robust_call('remove_flags', *args, **kwargs)
+    copy = lambda self, *args, **kwargs: \
+      self._robust_call('copy', *args, **kwargs)
 
 #md = mailbox.Maildir('maildirtest')
 #    localID = md.add(msg)

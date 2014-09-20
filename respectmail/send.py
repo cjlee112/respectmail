@@ -34,11 +34,9 @@ def get_draft_templates(srv, mbox='Drafts'):
             d = {}
             for line in msg.get_payload().split('\n'):
                 s = line.split()
-                if len(s) >= 2:
-                    token = s[0]
-                    if token.startswith(':') and token.endswith(':'):
-                        token = token[1:-1] # strip off ::
-                    d[token] = line[line.index(s[1]):]
+                if len(s) >= 2 and s[0].startswith(':') and s[0].endswith(':'):
+                    token = s[0][1:-1] # strip off ::
+                    d[token] = line[line.index(s[1]):].rstrip()
             outList.append((msgID, d, msg))
     return templateDict, outList
 

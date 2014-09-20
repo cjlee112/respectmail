@@ -172,7 +172,7 @@ e.g. ``no-thanks`` or ``vip``.
   no addressee, etc.
 * in your text you can include Python format strings of the form::
 
-    text gets inserted here: %(FIELDNAME)%s
+    text gets inserted here: %(FIELDNAME)s
 
   where ``FIELDNAME`` is the name of the field you want to insert at
   that point.

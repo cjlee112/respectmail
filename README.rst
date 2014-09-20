@@ -144,6 +144,65 @@ folder and recategorize messages if necessary.
 Rerun the respectmail triage just before viewing your new
 incoming mail (using whatever IMAP client you like).
 
+Using "Form Letters"
+--------------------
+
+Respectmail makes it easy to send form letters, by creating any 
+number of named templates that you can use at any time.
+
+To use this feature, you need to add the following line format to your
+``config.py``, so that Respectmail can automatically send email
+for you by connecting to an SMTP server::
+
+  smtpKwargs = dict(host='SMTPHOST', user='USERNAME')
+
+where ``SMTPHOST`` is the hostname of your SMTP server, and
+``USERNAME`` is your username for that SMTP server.  Respectmail
+will connect using SSL and will prompt you for your password.
+
+Next, you create form letter *templates*, simply by writing an
+email with a subject line of the form::
+
+  :template: TEMPLATENAME
+
+where ``TEMPLATENAME`` is the name you want to assign the template,
+e.g. ``no-thanks`` or ``vip``.
+
+* all you need to write is the **Subject** and **text** of the message:
+  no addressee, etc.
+* in your text you can include Python format strings of the form::
+
+    text gets inserted here: %(FIELDNAME)%s
+
+  where ``FIELDNAME`` is the name of the field you want to insert at
+  that point.
+
+* save the email to your **Drafts** folder where respectmail will look for it.
+
+Now, to send a form letter, simply write an email text that begins::
+
+  :respect: TEMPLATENAME
+
+where ``TEMPLATENAME`` is the name of the form-letter template you want
+to use.
+
+* you can have additional lines of the form::
+
+    :FIELDNAME: some text here...
+
+  which will provide field values to the template.
+
+* save the email to your **Drafts** folder where respectmail will look for it.
+
+Typical example: say I get a request that I really don't have time for.
+I just click **Reply** and type::
+
+  :respect: no-thanks
+
+then save the draft email to Drafts, without sending it.  The next time
+respectmail runs, it will apply the template and send the message
+automatically for me.
+
 
 Why Did I Start This?
 ---------------------

@@ -42,9 +42,11 @@ class TriageDB(object):
                       myAddrs=self.myAddrs, serverID=serverID, **kwargs)
         self.conn.commit()
 
-    def save_verdicts(self, msgHeaders, mailbox, verdict, overwrite=True):
+    def save_verdicts(self, msgHeaders, mailbox, verdict, overwrite=True,
+                      serverID=1):
         'user has triaged messages to mailbox, so record that verdict'
-        save_verdicts(self.cursor, msgHeaders, mailbox, verdict, overwrite)
+        save_verdicts(self.cursor, msgHeaders, mailbox, verdict, overwrite,
+                      myAddrs=self.myAddrs, serverID=serverID)
         self.conn.commit()
 
     def update_threads(self, goodVerdicts):
@@ -312,7 +314,7 @@ def save_messages(c, messages, defaultTZ=7*3600, from_me_f=is_from_me,
             pass
 
 def save_verdicts(c, messages, mboxName, verdict, overwrite=True,
-                  tableName='messages'):
+                  tableName='messages', **kwargs):
     'record user triage decision of messages'
     for serverMsg,m in messages:
         try:
@@ -328,9 +330,12 @@ def save_verdicts(c, messages, mboxName, verdict, overwrite=True,
             if c.rowcount == 0: # preserve old verdict
                 c.execute('update %s set serverMsg=?, mailbox=? where msgid=?' % tableName, 
                           (serverMsg, mboxName, msgID))
-        #if c.rowcount != 1:
-        #    warnings.warn('save_verdict: message-id %s not found or not unique, rowcount %d'
-        #                  % (msgID, c.rowcount))
+        if c.rowcount == 0: # message not found in database, so insert NEW
+            save_messages(c, [(serverMsg,m)], mboxName=mboxName,
+                          verdict=verdict, tableName=tableName, **kwargs)
+        elif c.rowcount > 1:
+            warnings.warn('save_verdict: message-id %s not unique, rowcount %d'
+                          % (msgID, c.rowcount))
 
 
 def get_my_message_ids(c):

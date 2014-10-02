@@ -54,14 +54,16 @@ class IMAPServer(object):
         self.msgLists[SENT] = msgHeaders
         # update verdicts based on last round of triage by user
         msgHeaders = get_headers(self.server, self.mboxlist[REQUESTS])
-        triageDB.save_verdicts(msgHeaders, self.mboxlist[REQUESTS], REQUESTS)
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[REQUESTS], REQUESTS,
+                               serverID=self.serverID)
         self.msgLists[REQUESTS] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[FYI])
-        triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI)
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[FYI], FYI,
+                               serverID=self.serverID)
         self.msgLists[FYI] = msgHeaders
         msgHeaders = get_headers(self.server, self.mboxlist[CLOSED])
         triageDB.save_verdicts(msgHeaders, self.mboxlist[CLOSED], CLOSED,
-                               overwrite=False)
+                               overwrite=False, serverID=self.serverID)
         self.purge_blacklist(triageDB, expunge)
 
     def purge_blacklist(self, triageDB, expunge=True):
@@ -73,7 +75,8 @@ class IMAPServer(object):
     def get_blacklist_updates(self, mbox, triageDB, expunge=True):
         'update blacklist verdicts based on user actions, and clear mbox'
         msgHeaders = get_headers(self.server, mbox)
-        triageDB.save_verdicts(msgHeaders, self.mboxlist[BLACKLIST], BLACKLIST)
+        triageDB.save_verdicts(msgHeaders, self.mboxlist[BLACKLIST], BLACKLIST,
+                               serverID=self.serverID)
         triageDB.blacklist(msgHeaders)
         self.server.delete_messages([t[0] for t in msgHeaders])
         if expunge:

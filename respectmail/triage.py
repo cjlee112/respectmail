@@ -38,4 +38,5 @@ in %(btname)s will be blacklisted.
         send.send_all_templates(servers, **smtpKwargs)
         for srv in servers:
             print 'purging blacklisted messages from %s...' % srv.host
+            srv.server._connect() # refresh connection
             srv.purge_blacklist(triageDB)

@@ -249,7 +249,7 @@ class RobustClient(object):
             func = getattr(self._server, funcName)
             try:
                 return func(*args, **kwargs)
-            except (socket.error,imaplib.abort):
+            except (socket.error, imaplib.IMAP4.abort):
                 print 'socket error for %s.  Retrying...' % self._host
                 while True:
                     try:

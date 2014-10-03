@@ -69,14 +69,15 @@ def apply_templates(srv, smtpServer, templateDict, msgList, expunge=True):
 
 def send_all_templates(servers, host, user, mbox='Drafts', expunge=True):
     'send all template messages on the specified servers'
-    smtpServer = None
-    for srv in servers:
-        templateDict, msgList = get_draft_templates(srv, mbox)
-        if msgList:
-            if not smtpServer:
-                smtpServer = SMTPServer(host, user) # get SMTP connection
-            apply_templates(srv, smtpServer, templateDict, msgList, expunge)
-    if smtpServer is not None:
+    templateDict = {}
+    msgList = []
+    for srv in servers: # get templates and messages from servers
+        t = get_draft_templates(srv, mbox)
+        templateDict.update(t[0])
+        msgList += t[1]
+    if msgList: # send out messages using our templates
+        smtpServer = SMTPServer(host, user) # get SMTP connection
+        apply_templates(srv, smtpServer, templateDict, msgList, expunge)
         smtpServer.quit()
 
 

@@ -24,6 +24,8 @@ def do_triage():
 
 if __name__ == '__main__':
     triageDB, servers, smtpKwargs = do_triage()
+    for srv in servers:
+        srv.server._disconnect() # avoid socket timeout in case user delays
     d = dict(btname=servers[0].mboxlist[imap.BLACKLISTTRIAGE],
              blname=servers[0].mboxlist[imap.BLACKLIST]) # get mbox names
     print '''

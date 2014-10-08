@@ -231,7 +231,8 @@ def ensure_folder(server, foldername):
 
 class RobustClient(object):
     'IMAP connection that auto-retries after socket.error'
-    def __init__(self, host, user, password=None, *args, **kwargs):
+    def __init__(self, host, user, password=None, immediateLogin=False,
+                 *args, **kwargs):
         self._host = host
         self._user = user
         if password is None:
@@ -240,14 +241,22 @@ class RobustClient(object):
         self._password = password
         self._args = args
         self._kwargs = kwargs
-        self._connect()
+        if immediateLogin:
+            self._connect()
     def _connect(self):
         'login to IMAP server'
         self._server = IMAPClient(self._host, *self._args, **self._kwargs)
         self._server.login(self._user, self._password)
+    def _disconnect(self):
+        '''drop IMAPClient connection, e.g. to prevent socket timeout
+        (any method call will automatically reconnect)'''
+        self._server.logout()
+        del self._server
     def _robust_call(self, funcName, *args, **kwargs):
         'perform IMAPClient call, restoring server connection if necessary'
         topLevel = ('list_folders', 'create_folder', 'select_folder')
+        if not hasattr(self, '_server'): # connect just-in-time
+            self._connect()
         while True:
             func = getattr(self._server, funcName)
             try:

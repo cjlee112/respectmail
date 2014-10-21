@@ -1,5 +1,7 @@
 from imapclient import IMAPClient, SEEN
 import email
+from email.feedparser import FeedParser
+from email.message import Message
 import warnings
 from getpass import getpass
 import socket
@@ -187,6 +189,15 @@ def filter_message_ids(msgHeaders, msgDict):
             l.append((serverMsg, m))
     return l
 
+def message_from_string_safe(text):
+    'handle failure by email standard library by bypassing StringIO blowup'
+    try: # use the standard library by default
+        return email.message_from_string(text)
+    except UnicodeEncodeError: # code copied from email.parser.Parse.parse()
+        feedparser = FeedParser(Message)
+        feedparser._set_headersonly()
+        feedparser.feed(text)
+        return feedparser.close()
 
 def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]',
                 preserveState=True):
@@ -199,13 +210,9 @@ def get_headers(server, mailbox='INBOX', maxreq=200, data='BODY[HEADER]',
     for i in range(0, len(msgList), maxreq):
         msgDict = server.fetch(msgList[i:i + maxreq], ['FLAGS', data])
         for j,m in msgDict.iteritems():
-            try:
-                msg = email.message_from_string(m[data])
-            except UnicodeEncodeError:
-                warnings.warn('ignoring message headers due to UnicodeEncodeError')
-            else:
-                msg._imapFlags = m['FLAGS']
-                msgHeaders.append((j,msg))
+            msg = message_from_string_safe(m[data])
+            msg._imapFlags = m['FLAGS']
+            msgHeaders.append((j,msg))
     if preserveState:
         server.remove_flags(unseen, [SEEN]) # reset back to unseen state
     return msgHeaders

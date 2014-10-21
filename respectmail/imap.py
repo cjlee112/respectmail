@@ -193,7 +193,7 @@ def message_from_string_safe(text):
     'handle failure by email standard library by bypassing StringIO blowup'
     try: # use the standard library by default
         return email.message_from_string(text)
-    except UnicodeEncodeError: # code copied from email.parser.Parse.parse()
+    except UnicodeEncodeError: # code copied from email.parser.Parser.parse()
         feedparser = FeedParser(Message)
         feedparser._set_headersonly()
         feedparser.feed(text)
